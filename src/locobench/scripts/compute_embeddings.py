@@ -98,12 +98,25 @@ def create_run_name(config: Dict[str, Any]) -> str:
             return "ATK"
         return v.upper()
 
+    def map_strength(val: Any) -> str:
+        if val is None:
+            return ""
+        try:
+            strength_float = float(val)
+        except (TypeError, ValueError):
+            return str(val)
+        # Keep concise string but preserve exact 0/1 boundaries
+        if strength_float in (0.0, 1.0):
+            return f"{int(strength_float)}"
+        return f"{strength_float:.3f}".rstrip("0").rstrip(".")
+
     def build_method_tag(eff: Dict[str, Any]) -> str:
         return "_".join(
             [
                 map_layers(eff.get("calib_layers")),
                 map_source(eff.get("calib_source_tokens")),
                 str(eff.get("calib_basket_size")),
+                map_strength(eff.get("calib_strength")),
             ]
         )
 
@@ -344,12 +357,14 @@ def compute_embeddings(config: Dict[str, Any]) -> Dict[str, Any]:
     sa_layers = pick("standalone", "calib_layers", None)
     sa_source = pick("standalone", "calib_source_tokens", None)
     sa_basket = pick("standalone", "calib_basket_size", None)
+    sa_strength = pick("standalone", "calib_strength", 1.0)
 
     # Late-chunking calibration args
     lc_apply = bool(pick("latechunk", "apply_attn_calibration", False))
     lc_layers = pick("latechunk", "calib_layers", None)
     lc_source = pick("latechunk", "calib_source_tokens", None)
     lc_basket = pick("latechunk", "calib_basket_size", None)
+    lc_strength = pick("latechunk", "calib_strength", 1.0)
 
     standalone_embedder = StandaloneEmbedder(
         model_name=model_name,
@@ -358,6 +373,7 @@ def compute_embeddings(config: Dict[str, Any]) -> Dict[str, Any]:
         calib_layers=sa_layers,
         calib_source_tokens=sa_source,
         calib_basket_size=sa_basket,
+        calib_strength=sa_strength,
         device_map=device_map,
     )
 
@@ -368,6 +384,7 @@ def compute_embeddings(config: Dict[str, Any]) -> Dict[str, Any]:
         calib_layers=lc_layers,
         calib_source_tokens=lc_source,
         calib_basket_size=lc_basket,
+        calib_strength=lc_strength,
         device_map=device_map,
     )
 
@@ -386,12 +403,14 @@ def compute_embeddings(config: Dict[str, Any]) -> Dict[str, Any]:
             "calib_layers": sa_layers,
             "calib_source_tokens": sa_source,
             "calib_basket_size": sa_basket,
+            "calib_strength": sa_strength,
         },
         "latechunk": {
             "apply_attn_calibration": lc_apply,
             "calib_layers": lc_layers,
             "calib_source_tokens": lc_source,
             "calib_basket_size": lc_basket,
+            "calib_strength": lc_strength,
         },
     }
 
@@ -470,12 +489,14 @@ def compute_embeddings(config: Dict[str, Any]) -> Dict[str, Any]:
             "calib_layers": sa_layers,
             "calib_source_tokens": sa_source,
             "calib_basket_size": sa_basket,
+            "calib_strength": sa_strength,
         },
         "latechunk": {
             "apply_attn_calibration": lc_apply,
             "calib_layers": lc_layers,
             "calib_source_tokens": lc_source,
             "calib_basket_size": lc_basket,
+            "calib_strength": lc_strength,
         },
     }
     # Save output config

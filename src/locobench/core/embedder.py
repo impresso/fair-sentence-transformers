@@ -47,6 +47,7 @@ class BaseEmbedder:
         calib_layers: Optional[str] = None,
         calib_source_tokens: Optional[str] = None,
         calib_basket_size: Optional[int] = None,
+        calib_strength: Optional[float] = 1.0,
         device_map: Optional[Union[str, Dict[str, Union[int, str]]]] = None,
     ):
         """
@@ -129,6 +130,12 @@ class BaseEmbedder:
                     "Must specify calib_basket_size when using attention calibration"
                 )
             self.calib_basket_size = calib_basket_size
+            assert calib_strength is not None
+            assert isinstance(
+                calib_strength, (float, int)
+            ), f"calib_strength must be float-like, got {type(calib_strength)}"
+            assert 0.0 <= float(calib_strength) <= 1.0, "calib_strength must be in [0, 1]"
+            self.calib_strength = float(calib_strength)
             # Track calibration stats across the run
             self.calib_short_seq_count: int = 0
             self.calib_total_seq_count: int = 0
@@ -204,7 +211,7 @@ class BaseEmbedder:
                     attn = self.model.encoder.layer[
                         i
                     ].attention.source.self__attention_0.source.nn_functional_softmax_0.output
-
+                    orig_attn = attn.clone()
                     # Shape assertions (fail fast)
                     assert attn.dim() == 4, f"Expected attn to be 4D, got {attn.shape}"
                     B, H, Q, K = attn.shape
@@ -319,10 +326,15 @@ class BaseEmbedder:
                     # Replace selected query rows in-place to avoid extra full-tensor allocation
                     attn.index_copy_(2, q_idx, normalized)
 
+                    updated_attention = (
+                        self.combine_recalibrated_and_original_attention(
+                            attn, orig_attn, self.calib_strength
+                        )
+                    )
                     self.model.encoder.layer[
                         i
                     ].attention.source.self__attention_0.source.nn_functional_softmax_0.output = (
-                        attn
+                        updated_attention
                     )
 
                 # Request the final model output so it is materialized after the trace.
@@ -345,6 +357,40 @@ class BaseEmbedder:
         # Fallback for tuple/list where index 0 is last_hidden_state (common HF convention)
         assert len(model_output) > 0, "Empty model output sequence"
         return SimpleNamespace(last_hidden_state=model_output[0])
+
+    def combine_recalibrated_and_original_attention(
+        self,
+        recalibrated_attention: torch.Tensor,
+        original_attention: torch.Tensor,
+        recalibration_strength: Union[float, torch.Tensor],
+    ):
+        """
+        Blends recalibrated and original attention using linear interpolation.
+
+        Args:
+            recalibrated_attention: Tensor of recalibrated attention weights
+            original_attention: Tensor of original attention weights (same shape as recalibrated)
+            recalibration_strength: Float in [0, 1] controlling the blend ratio
+                - 0.0: returns original attention only
+                - 0.5: returns equal mix of both
+                - 1.0: returns recalibrated attention only
+
+        Returns:
+            Blended attention tensor with same shape as inputs
+        """
+        assert (
+            recalibrated_attention.shape == original_attention.shape
+        ), "recalibrated_attention and original_attention must have the same shape"
+        strength = torch.as_tensor(
+            recalibration_strength,
+            device=recalibrated_attention.device,
+            dtype=recalibrated_attention.dtype,
+        )
+        assert strength.ndim == 0, "recalibration_strength must be a scalar"
+        assert 0.0 <= float(strength.item()) <= 1.0, "recalibration_strength must be in [0, 1]"
+        return (recalibrated_attention * strength) + (
+            original_attention * (1.0 - strength)
+        )
 
     def get_model_outputs(
         self, input_ids: torch.Tensor, attention_mask: torch.Tensor
@@ -481,6 +527,7 @@ class StandaloneEmbedder(BaseEmbedder):
         calib_layers: Optional[str] = None,
         calib_source_tokens: Optional[str] = None,
         calib_basket_size: Optional[int] = None,
+        calib_strength: Optional[float] = 1.0,
         device_map: Optional[Union[str, Dict[str, Union[int, str]]]] = None,
     ):
         """
@@ -502,6 +549,7 @@ class StandaloneEmbedder(BaseEmbedder):
             calib_layers=calib_layers,
             calib_source_tokens=calib_source_tokens,
             calib_basket_size=calib_basket_size,
+            calib_strength=calib_strength,
             device_map=device_map,
         )
 
@@ -605,6 +653,7 @@ class LateChunkingEmbedder(BaseEmbedder):
         calib_layers: Optional[str] = None,
         calib_source_tokens: Optional[str] = None,
         calib_basket_size: Optional[int] = None,
+        calib_strength: Optional[float] = 1.0,
         device_map: Optional[Union[str, Dict[str, Union[int, str]]]] = None,
     ):
         """
@@ -626,6 +675,7 @@ class LateChunkingEmbedder(BaseEmbedder):
             calib_layers=calib_layers,
             calib_source_tokens=calib_source_tokens,
             calib_basket_size=calib_basket_size,
+            calib_strength=calib_strength,
             device_map=device_map,
         )
 
@@ -763,6 +813,7 @@ class TextEmbedder:
         calib_layers: Optional[str] = None,
         calib_source_tokens: Optional[str] = None,
         calib_basket_size: Optional[int] = None,
+        calib_strength: Optional[float] = 1.0,
         device_map: Optional[Union[str, Dict[str, Union[int, str]]]] = None,
     ) -> None:
         assert (
@@ -779,6 +830,7 @@ class TextEmbedder:
             calib_layers=calib_layers,
             calib_source_tokens=calib_source_tokens,
             calib_basket_size=calib_basket_size,
+            calib_strength=calib_strength,
             device_map=device_map,
         )
 
