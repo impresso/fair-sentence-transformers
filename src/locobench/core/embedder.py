@@ -11,14 +11,17 @@ and late-chunking embedding (where documents are embedded as part of a larger co
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from transformers import AutoModel, AutoTokenizer
-from typing import List, Dict, Union, Literal, Optional, Any, Tuple
+from transformers import AutoModel, AutoTokenizer, AutoConfig
+from typing import List, Dict, Union, Literal, Optional, Any, Tuple, Callable, Set
 import tqdm
 import importlib.util
 from torch import Tensor
 import nnsight
 from types import SimpleNamespace
 import numpy as np
+import warnings
+from sentence_transformers import SentenceTransformer
+from sentence_transformers.models import Pooling
 
 
 DEVICE = (
@@ -134,7 +137,9 @@ class BaseEmbedder:
             assert isinstance(
                 calib_strength, (float, int)
             ), f"calib_strength must be float-like, got {type(calib_strength)}"
-            assert 0.0 <= float(calib_strength) <= 1.0, "calib_strength must be in [0, 1]"
+            assert (
+                0.0 <= float(calib_strength) <= 1.0
+            ), "calib_strength must be in [0, 1]"
             self.calib_strength = float(calib_strength)
             # Track calibration stats across the run
             self.calib_short_seq_count: int = 0
@@ -387,7 +392,9 @@ class BaseEmbedder:
             dtype=recalibrated_attention.dtype,
         )
         assert strength.ndim == 0, "recalibration_strength must be a scalar"
-        assert 0.0 <= float(strength.item()) <= 1.0, "recalibration_strength must be in [0, 1]"
+        assert (
+            0.0 <= float(strength.item()) <= 1.0
+        ), "recalibration_strength must be in [0, 1]"
         return (recalibrated_attention * strength) + (
             original_attention * (1.0 - strength)
         )
@@ -790,7 +797,7 @@ class LateChunkingEmbedder(BaseEmbedder):
         return all_embeddings
 
 
-class TextEmbedder:
+class TextEmbedderOLD:
     """
     Lightweight SentenceTransformers-like wrapper focused on encode().
 
@@ -917,7 +924,7 @@ class TextEmbedder:
             assert last_hidden_state.dim() == 3 and last_hidden_state.shape[0] == B
 
             # Model-appropriate pooling
-            pooling_method = self.pooling_by_model.get(self.model_name, "mean")
+            pooling_method = self.pooling_by_model.get(self.model_name, "cls")
             if pooling_method == "cls":
                 pooled = last_hidden_state[:, 0, :]
             elif pooling_method == "mean":
@@ -939,6 +946,429 @@ class TextEmbedder:
         embeddings = torch.cat(all_embeddings, dim=0)
 
         # Output formatting
+        if convert_to_tensor:
+            return embeddings
+        if convert_to_numpy:
+            return embeddings.detach().numpy()
+        return embeddings
+
+
+class TextEmbedder(SentenceTransformer):
+    """SentenceTransformers-compatible embedder with positional fairness calibration."""
+
+    TESTED_MODELS: Tuple[str, ...] = ("Alibaba-NLP/gte-multilingual-base",)
+
+    DECODER_ARCH_NAMES: Set[str] = {"qwen", "llama", "gpt", "mistral", "falcon"}
+
+    ATTENTION_PATHS: Dict[str, Union[str, Callable[[Any, int], Any]]] = {
+        "Alibaba-NLP/gte-multilingual-base": "encoder.layer[{i}].attention.source.self__attention_0.source.nn_functional_softmax_0.output",
+        "BAAI/bge-m3": "encoder.layer[{i}].attention.self.source.nn_functional_softmax_0.output",
+        "Qwen/Qwen3-Embedding-0.6B": "layers[{i}].self_attn.source.attention_interface_0.source.nn_functional_softmax_0.output",
+        "Qwen/Qwen3-Embedding-4B": "layers[{i}].self_attn.source.attention_interface_0.source.nn_functional_softmax_0.output",
+        "Qwen/Qwen3-Embedding-8B": "layers[{i}].self_attn.source.attention_interface_0.source.nn_functional_softmax_0.output",
+        "jinaai/jina-embeddings-v3": "roberta.encoder.layers[{i}].mixer.inner_attn.source.torch_softmax_0.output",
+        "NovaSearch/stella_en_400M_v5": "encoder.layer[{i}].attention.source.self__attention_0.source.nn_functional_softmax_0.output",
+    }
+
+    ############################################################################
+    #                               NOTES                                      #
+    ############################################################################
+    # - For NovaSearch/stella_en_400M_v5, the following changes need to be made in modeling.py:
+    #   1. change line 684: from attn_implementation=None to attn_implementation="eager"
+    #   2. change line 689: from != to ==
+    #   3. add new line 940: unpad_inputs = False
+
+    def __init__(
+        self,
+        model_name_or_path: str,
+        *,
+        device: Optional[str] = None,
+        device_map: Optional[Union[str, Dict[str, Union[int, str]]]] = None,
+        attention_path_override: Optional[Callable[[Any, int], Any]] = None,
+        pooling_override: Optional[Literal["cls", "mean", "last"]] = None,
+        calibrated_tokens_override: Optional[Literal["cls", "all", "last"]] = None,
+        trust_remote_code: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        self._torch_dtype = (
+            torch.float16
+            if torch.cuda.is_available() or torch.backends.mps.is_available()
+            else None
+        )
+        self._config = AutoConfig.from_pretrained(
+            model_name_or_path, trust_remote_code=trust_remote_code
+        )
+        self.padding_side = self._detect_padding_side()
+
+        original_class_name = self.__class__.__name__
+        self.__class__.__name__ = "SentenceTransformer"
+        try:
+            super().__init__(
+                model_name_or_path,
+                device=device,
+                trust_remote_code=trust_remote_code,
+                model_kwargs={
+                    "device_map": device_map,
+                    "torch_dtype": self._torch_dtype,
+                },
+                tokenizer_kwargs={"padding_side": self.padding_side},
+                **kwargs,
+            )
+        finally:
+            self.__class__.__name__ = original_class_name
+
+        self.model_name_or_path = model_name_or_path
+        self.device_map = device_map
+        self.trust_remote_code = trust_remote_code
+        self._attention_path_override = attention_path_override
+        self._pooling_override = pooling_override
+        self._calibrated_tokens_override = calibrated_tokens_override
+        if model_name_or_path not in self.TESTED_MODELS:
+            warnings.warn(
+                f"Model '{model_name_or_path}' is untested; tested models: {self.TESTED_MODELS}",
+                RuntimeWarning,
+            )
+
+        self.pooling_strategy = self._infer_pooling_strategy()
+        self.calib_source_mode = self._calibration_source_mode()
+
+        self._nnsight_model: Optional[nnsight.NNsight] = None
+        self._num_layers: Optional[int] = None
+        print(
+            "Summary of TextEmbedder configuration:"
+            f"\n  Model: {model_name_or_path}"
+            f"\n  Padding side: {self.padding_side}"
+            f"\n  Pooling strategy: {self.pooling_strategy}"
+            f"\n  Calibrated token(s): {self.calib_source_mode}"
+        )
+
+    def _detect_padding_side(self) -> Literal["left", "right"]:
+        model_type = str(getattr(self._config, "model_type", "")).lower()
+        if any(name in model_type for name in self.DECODER_ARCH_NAMES):
+            return "left"
+        return "right"
+
+    def _infer_pooling_strategy(self) -> Literal["cls", "mean", "last"]:
+        """Infer pooling strategy from ST pooling module; fallback to CLS."""
+        override = self._pooling_override
+        if override is not None:
+            if override in ("cls", "mean", "last"):
+                return override
+            raise AssertionError(f"Unsupported pooling override: {override}")
+
+        pooling_modules = [m for m in self._modules.values() if isinstance(m, Pooling)]
+        if pooling_modules:
+            pooling = pooling_modules[0]
+            if getattr(pooling, "pooling_mode_lasttoken", False):
+                return "last"
+            if getattr(pooling, "pooling_mode_cls_token", False):
+                return "cls"
+            if getattr(pooling, "pooling_mode_mean_tokens", False):
+                return "mean"
+        warnings.warn(
+            "Pooling strategy could not be inferred; defaulting to first token (CLS)",
+            RuntimeWarning,
+        )
+        return "cls"
+
+    def _calibration_source_mode(self) -> Literal["cls", "all", "last"]:
+        """Determine which token(s) to use for attention calibration."""
+        override = self._calibrated_tokens_override
+        if override is not None:
+            if override in ("cls", "all", "last"):
+                return override
+            raise AssertionError(f"Unsupported calibrated tokens override: {override}")
+
+        if self.pooling_strategy == "cls":
+            return "cls"
+        if self.pooling_strategy == "mean":
+            return "all"
+        if self.pooling_strategy == "last":
+            return "last"
+        raise AssertionError(f"Unsupported pooling strategy: {self.pooling_strategy}")
+
+    def _resolve_attention_softmax(self, layer_idx: int):
+        assert self._nnsight_model is not None
+        resolver = self._attention_path_override
+        if resolver is None:
+            resolver = self._default_attention_path(self.model_name_or_path)
+        assert (
+            resolver is not None
+        ), f"No attention path resolver for {self.model_name_or_path}"
+        return resolver(self._nnsight_model, layer_idx)
+
+    @staticmethod
+    def _compile_attention_path(path_template: str) -> Callable[[Any, int], Any]:
+        def resolver(model: Any, layer_idx: int) -> Any:
+            path = path_template.format(i=layer_idx)
+            target = model
+            for segment in path.split("."):
+                while "[" in segment:
+                    attr, bracket, rest = segment.partition("[")
+                    assert bracket == "["
+                    index_str, closing, remainder = rest.partition("]")
+                    assert closing == "]"
+                    if attr:
+                        target = getattr(target, attr)
+                    idx = int(index_str)
+                    target = target[idx]
+                    segment = remainder
+                if segment:
+                    target = getattr(target, segment)
+            return target
+
+        return resolver
+
+    def _default_attention_path(
+        self, model_name: str
+    ) -> Optional[Callable[[Any, int], Any]]:
+        entry = self.ATTENTION_PATHS.get(model_name)
+        if entry is None:
+            return None
+        if isinstance(entry, str):
+            return self._compile_attention_path(entry)
+        return entry
+
+    def _ensure_nnsight_model(self) -> None:
+        if self._nnsight_model is not None:
+            return
+        hf_model = AutoModel.from_pretrained(
+            self.model_name_or_path,
+            trust_remote_code=self.trust_remote_code,
+            attn_implementation="eager",
+            device_map=self.device_map,
+            torch_dtype=self._torch_dtype,
+        )
+        if self.device_map is None:
+            hf_model = hf_model.to(self.device)
+        self._num_layers = int(hf_model.config.num_hidden_layers)
+        self._nnsight_model = nnsight.NNsight(hf_model)
+
+    def _validate_padding_mask(
+        self, attention_mask: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert self.padding_side in ("left", "right")
+        valid_len = attention_mask.sum(dim=1)
+        K = attention_mask.size(1)
+        pos = torch.arange(K, device=attention_mask.device).unsqueeze(0)
+        if self.padding_side == "right":
+            expected = (pos < valid_len.unsqueeze(1)).to(attention_mask.dtype)
+            start_idx = torch.zeros_like(valid_len, dtype=torch.long)
+        else:
+            start_idx = (K - valid_len).clamp_min(0).to(torch.long)
+            expected = (pos >= start_idx.unsqueeze(1)).to(attention_mask.dtype)
+        assert torch.equal(
+            attention_mask, expected
+        ), f"Attention mask must be {self.padding_side}-padded"
+        return expected.to(dtype=torch.bool), start_idx, valid_len.to(torch.long)
+
+    def _calibrate_attention(
+        self,
+        attn: torch.Tensor,
+        attention_mask: torch.Tensor,
+        basket_size: int,
+        strength: float,
+        source_mode: Literal["cls", "all", "last"],
+    ) -> torch.Tensor:
+        attention_mask = attention_mask.to(attn.device)
+        assert attn.dim() == 4, f"Expected attention 4D, got {attn.shape}"
+        B, H, Q, K = attn.shape
+        assert attention_mask.shape == (B, K)
+        assert Q == K, "Self-attention expected (Q==K)"
+        assert basket_size > 0
+        valid_mask, start_idx, valid_len = self._validate_padding_mask(attention_mask)
+        assert torch.all(valid_len > 0)
+        valid_mask = valid_mask.to(device=attn.device)
+        start_idx = start_idx.to(device=attn.device)
+        valid_len = valid_len.to(device=attn.device)
+
+        if source_mode == "cls":
+            pool_pos = start_idx
+            q_mask = torch.zeros((B, Q), device=attn.device, dtype=torch.bool)
+            q_mask[torch.arange(B, device=attn.device), pool_pos] = True
+        elif source_mode == "all":
+            pool_pos = start_idx
+            q_mask = valid_mask
+        elif source_mode == "last":
+            pool_pos = start_idx + valid_len - 1
+            q_mask = torch.zeros((B, Q), device=attn.device, dtype=torch.bool)
+            q_mask[torch.arange(B, device=attn.device), pool_pos] = True
+        else:
+            raise AssertionError(f"Unsupported source_mode: {source_mode}")
+        q_mask_b = q_mask.view(B, 1, Q, 1)
+
+        S = int(basket_size)
+        pos = torch.arange(K, device=attn.device).view(1, 1, 1, K)
+        start_idx_b = start_idx.view(B, 1, 1, 1)
+        content_rel = (pos - start_idx_b).clamp_min(0)
+
+        if source_mode == "all":
+            basket_ids = content_rel // S
+            max_baskets = int(((valid_len + S - 1) // S).max().item())
+            basket_ids = basket_ids.clamp_max(max_baskets - 1)
+            n_baskets = ((valid_len + S - 1) // S).to(dtype=attn.dtype).view(B, 1, 1, 1)
+        else:
+            pool_pos_b = pool_pos.view(B, 1, 1, 1)
+            basket_ids = torch.where(
+                pos == pool_pos_b,
+                torch.zeros_like(pos),
+                1 + ((content_rel - 1).clamp_min(0) // S),
+            )
+            max_content_baskets = ((valid_len - 1 + (S - 1)) // S).clamp_min(0)
+            max_baskets = 1 + int(max_content_baskets.max().item())
+            basket_ids = basket_ids.clamp_max(max_baskets - 1)
+            n_content = ((torch.clamp_min(valid_len - 1, 0) + (S - 1)) // S).to(
+                dtype=attn.dtype
+            )
+            n_baskets = (1 + n_content).view(B, 1, 1, 1)
+
+        basket_ids = basket_ids.expand(B, H, Q, K)
+
+        mask_bk = valid_mask.view(B, 1, 1, K).to(dtype=attn.dtype)
+        attn_masked = attn * mask_bk
+
+        bucket_sums = torch.zeros(
+            (B, H, Q, max_baskets), device=attn.device, dtype=attn.dtype
+        )
+        bucket_sums = bucket_sums.scatter_add(
+            dim=-1, index=basket_ids.to(torch.long), src=attn_masked
+        )
+        denom = bucket_sums.gather(dim=-1, index=basket_ids.to(torch.long))
+
+        scaled = attn_masked * S
+        calibrated = torch.where(
+            denom > 0, (scaled / denom) * (1.0 / n_baskets), torch.zeros_like(scaled)
+        )
+        calibrated = calibrated * mask_bk
+
+        row_sum = calibrated.sum(dim=-1, keepdim=True)
+        row_sum_squeezed = row_sum.squeeze(-1)
+        must_be_pos = q_mask.view(B, 1, Q).expand(B, H, Q)
+        assert torch.all(
+            row_sum_squeezed[must_be_pos] > 0
+        ), "Calibrated rows must sum to >0"
+
+        denom_rows = torch.where(q_mask_b, row_sum, torch.ones_like(row_sum))
+        normalized = torch.where(q_mask_b, calibrated / denom_rows, attn_masked)
+
+        orig_masked = attn * mask_bk
+        blended = torch.where(
+            q_mask_b,
+            normalized * strength + orig_masked * (1.0 - strength),
+            orig_masked,
+        )
+        return blended
+
+    def _extract_last_hidden_state(self, model_output: Any) -> torch.Tensor:
+        if hasattr(model_output, "last_hidden_state"):
+            return model_output.last_hidden_state
+        if isinstance(model_output, dict):
+            assert "last_hidden_state" in model_output, "Missing last_hidden_state"
+            return model_output["last_hidden_state"]
+        assert isinstance(model_output, (list, tuple)) and len(model_output) > 0
+        return model_output[0]
+
+    def _pool(self, hidden: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        attention_mask = attention_mask.to(hidden.device)
+        valid_mask, start_idx, valid_len = self._validate_padding_mask(attention_mask)
+        if self.pooling_strategy == "cls":
+            pooled = hidden[
+                torch.arange(hidden.size(0), device=hidden.device), start_idx
+            ]
+        elif self.pooling_strategy == "mean":
+            pooled = self._mean_pool(hidden, attention_mask)
+        elif self.pooling_strategy == "last":
+            last_idx = start_idx + valid_len - 1
+            pooled = hidden[
+                torch.arange(hidden.size(0), device=hidden.device), last_idx
+            ]
+        else:
+            raise AssertionError(
+                f"Unsupported pooling strategy: {self.pooling_strategy}"
+            )
+        assert pooled.dim() == 2 and pooled.size(0) == hidden.size(0)
+        return pooled
+
+    @staticmethod
+    def _mean_pool(hidden: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        mask = attention_mask.unsqueeze(-1)
+        summed = (hidden * mask).sum(dim=1)
+        lengths = mask.sum(dim=1)
+        return summed / lengths
+
+    def encode_positionally_fair(
+        self,
+        sentences: Union[str, List[str]],
+        *,
+        calib_basket_size: int,
+        calib_layers: int,
+        calib_strength: float,
+        batch_size: int = 32,
+        show_progress_bar: bool = False,
+        normalize_embeddings: bool = True,
+        device: Optional[str] = None,
+        convert_to_numpy: bool = True,
+        convert_to_tensor: bool = False,
+    ) -> Union[np.ndarray, torch.Tensor]:
+        assert calib_basket_size > 0
+        assert calib_layers > 0
+        assert 0.0 <= calib_strength <= 1.0
+
+        self._ensure_nnsight_model()
+        assert self._nnsight_model is not None and self._num_layers is not None
+        assert calib_layers <= self._num_layers, "calib_layers exceeds model depth"
+
+        if isinstance(sentences, str):
+            sentences_list: List[str] = [sentences]
+        else:
+            sentences_list = list(sentences)
+        assert len(sentences_list) > 0
+
+        use_device = (
+            torch.device(device) if device is not None else torch.device(self.device)
+        )
+
+        all_embeddings: List[torch.Tensor] = []
+        rng = range(0, len(sentences_list), batch_size)
+        iterator = tqdm.tqdm(rng, desc="Encoding (fair)", disable=not show_progress_bar)
+        for start in iterator:
+            end = min(start + batch_size, len(sentences_list))
+            chunk = sentences_list[start:end]
+            enc = self.tokenizer(
+                chunk, padding=True, truncation=True, return_tensors="pt"
+            )
+            input_ids: torch.Tensor = enc["input_ids"]
+            attention_mask: torch.Tensor = enc["attention_mask"]
+            assert input_ids.dim() == 2 and attention_mask.dim() == 2
+            B, L = input_ids.shape
+            assert attention_mask.shape == (B, L)
+
+            if self.device_map is None:
+                input_ids = input_ids.to(use_device)
+                attention_mask = attention_mask.to(use_device)
+
+            with self._nnsight_model.trace() as tracer:
+                with tracer.invoke(input_ids=input_ids, attention_mask=attention_mask):
+                    layer_start = max(0, self._num_layers - calib_layers)
+                    for idx in range(layer_start, self._num_layers):
+                        attn = self._resolve_attention_softmax(idx)
+                        calibrated = self._calibrate_attention(
+                            attn,
+                            attention_mask,
+                            basket_size=calib_basket_size,
+                            strength=calib_strength,
+                            source_mode=self.calib_source_mode,
+                        )
+                        attn.copy_(calibrated)
+                    model_output = self._nnsight_model.output.save()
+
+            hidden = self._extract_last_hidden_state(model_output)
+            pooled = self._pool(hidden, attention_mask)
+            if normalize_embeddings:
+                pooled = F.normalize(pooled, p=2, dim=1)
+            all_embeddings.append(pooled.cpu())
+
+        embeddings = torch.cat(all_embeddings, dim=0)
         if convert_to_tensor:
             return embeddings
         if convert_to_numpy:

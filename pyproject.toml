@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{include = "locobench", from = "src"}]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<4.0"
+python = ">=3.10,<3.15"
 torch = ">=2.0.0"
 transformers = "^4.53.0"
 polars = ">=0.20.0"
@@ -19,6 +19,7 @@ datasets = "^3.5.1"
 einops = "^0.8.1"
 seaborn = "^0.13.2"
 nnterp = {version = ">0.4.9", allow-prereleases = true}
+sentence-transformers = "^5.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.0"
