@@ -953,7 +953,7 @@ class TextEmbedderOLD:
         return embeddings
 
 
-class TextEmbedder(SentenceTransformer):
+class FairSentenceTransformer(SentenceTransformer):
     """SentenceTransformers-compatible embedder with positional fairness calibration."""
 
     TESTED_MODELS: Tuple[str, ...] = ("Alibaba-NLP/gte-multilingual-base",)
