@@ -1168,7 +1168,10 @@ class FairSentenceTransformer(SentenceTransformer):
         attention_mask: torch.Tensor,
         basket_size: int,
         strength: float,
-        source_mode: Literal["cls", "all", "last"],
+        isolate_bos: bool,
+        isolate_eos: bool,
+        bos_weight: Union[float, Literal["equal"]],
+        eos_weight: Union[float, Literal["equal"]],
     ) -> torch.Tensor:
         attention_mask = attention_mask.to(attn.device)
         assert attn.dim() == 4, f"Expected attention 4D, got {attn.shape}"
@@ -1182,12 +1185,18 @@ class FairSentenceTransformer(SentenceTransformer):
         start_idx = start_idx.to(device=attn.device)
         valid_len = valid_len.to(device=attn.device)
 
+        n_isolated = int(isolate_bos) + int(isolate_eos)
+        content_len = valid_len - n_isolated
+        assert torch.all(
+            content_len > 0
+        ), "content_len must be > 0 after isolating BOS/EOS"
+
+        source_mode = self.calib_source_mode
         if source_mode == "cls":
             pool_pos = start_idx
             q_mask = torch.zeros((B, Q), device=attn.device, dtype=torch.bool)
             q_mask[torch.arange(B, device=attn.device), pool_pos] = True
         elif source_mode == "all":
-            pool_pos = start_idx
             q_mask = valid_mask
         elif source_mode == "last":
             pool_pos = start_idx + valid_len - 1
@@ -1200,45 +1209,132 @@ class FairSentenceTransformer(SentenceTransformer):
         S = int(basket_size)
         pos = torch.arange(K, device=attn.device).view(1, 1, 1, K)
         start_idx_b = start_idx.view(B, 1, 1, 1)
-        content_rel = (pos - start_idx_b).clamp_min(0)
+        end_idx_b = (start_idx + valid_len - 1).view(B, 1, 1, 1)
+        bos_pos_b = start_idx_b
+        eos_pos_b = end_idx_b
 
-        if source_mode == "all":
-            basket_ids = content_rel // S
-            max_baskets = int(((valid_len + S - 1) // S).max().item())
-            basket_ids = basket_ids.clamp_max(max_baskets - 1)
-            n_baskets = ((valid_len + S - 1) // S).to(dtype=attn.dtype).view(B, 1, 1, 1)
+        is_bos = pos == bos_pos_b
+        is_eos = pos == eos_pos_b
+
+        content_offset = int(isolate_bos)
+        if isolate_bos:
+            content_start_b = start_idx_b + 1
         else:
-            pool_pos_b = pool_pos.view(B, 1, 1, 1)
-            basket_ids = torch.where(
-                pos == pool_pos_b,
-                torch.zeros_like(pos),
-                1 + ((content_rel - 1).clamp_min(0) // S),
+            content_start_b = start_idx_b
+        content_rel = (pos - content_start_b).clamp_min(0)
+
+        n_content_baskets = ((content_len + S - 1) // S).to(dtype=torch.long)
+        max_content_baskets = int(n_content_baskets.max().item())
+        n_total_baskets = n_content_baskets + n_isolated
+        max_total_baskets = max_content_baskets + n_isolated
+
+        content_basket_ids = content_offset + (content_rel // S)
+        content_basket_ids = content_basket_ids.clamp_max(
+            content_offset + max_content_baskets - 1
+        )
+
+        basket_ids = content_basket_ids.clone()
+        if isolate_bos:
+            basket_ids = torch.where(is_bos, torch.zeros_like(basket_ids), basket_ids)
+        if isolate_eos:
+            eos_basket_id = (content_offset + n_content_baskets.view(B, 1, 1, 1)).to(
+                basket_ids.dtype
             )
-            max_content_baskets = ((valid_len - 1 + (S - 1)) // S).clamp_min(0)
-            max_baskets = 1 + int(max_content_baskets.max().item())
-            basket_ids = basket_ids.clamp_max(max_baskets - 1)
-            n_content = ((torch.clamp_min(valid_len - 1, 0) + (S - 1)) // S).to(
-                dtype=attn.dtype
-            )
-            n_baskets = (1 + n_content).view(B, 1, 1, 1)
+            basket_ids = torch.where(is_eos, eos_basket_id, basket_ids)
 
         basket_ids = basket_ids.expand(B, H, Q, K)
+        assert basket_ids.shape == (B, H, Q, K)
 
         mask_bk = valid_mask.view(B, 1, 1, K).to(dtype=attn.dtype)
         attn_masked = attn * mask_bk
 
-        bucket_sums = torch.zeros(
-            (B, H, Q, max_baskets), device=attn.device, dtype=attn.dtype
+        is_content = (
+            valid_mask.view(B, 1, 1, K)
+            & ~(is_bos if isolate_bos else torch.zeros_like(is_bos))
+            & ~(is_eos if isolate_eos else torch.zeros_like(is_eos))
         )
+        is_content = is_content.to(dtype=attn.dtype)
+
+        bucket_sums = torch.zeros(
+            (B, H, Q, max_total_baskets), device=attn.device, dtype=attn.dtype
+        )
+        content_attn = attn_masked * is_content
         bucket_sums = bucket_sums.scatter_add(
-            dim=-1, index=basket_ids.to(torch.long), src=attn_masked
+            dim=-1, index=basket_ids.to(torch.long), src=content_attn
         )
         denom = bucket_sums.gather(dim=-1, index=basket_ids.to(torch.long))
 
-        scaled = attn_masked * S
-        calibrated = torch.where(
-            denom > 0, (scaled / denom) * (1.0 / n_baskets), torch.zeros_like(scaled)
+        n_content_baskets_f = n_content_baskets.to(dtype=attn.dtype).view(B, 1, 1, 1)
+        n_total_baskets_f = n_total_baskets.to(dtype=attn.dtype).view(B, 1, 1, 1)
+
+        calibrated_content = torch.where(
+            denom > 0,
+            (content_attn / denom) * (1.0 / n_total_baskets_f),
+            torch.zeros_like(content_attn),
         )
+
+        calibrated = calibrated_content.clone()
+
+        bos_orig = torch.where(is_bos, attn_masked, torch.zeros_like(attn_masked))
+        eos_orig = torch.where(is_eos, attn_masked, torch.zeros_like(attn_masked))
+        bos_attn_value = bos_orig.sum(dim=-1, keepdim=True)
+        eos_attn_value = eos_orig.sum(dim=-1, keepdim=True)
+
+        if isolate_bos:
+            if bos_weight == "equal":
+                bos_calibrated = torch.where(
+                    is_bos,
+                    torch.ones_like(attn_masked) / n_total_baskets_f,
+                    torch.zeros_like(attn_masked),
+                )
+                calibrated = calibrated + bos_calibrated
+            else:
+                assert isinstance(bos_weight, (int, float)) and 0.0 <= bos_weight <= 1.0
+                bos_kept = bos_weight * bos_orig
+                calibrated = calibrated + bos_kept
+
+        if isolate_eos:
+            if eos_weight == "equal":
+                eos_calibrated = torch.where(
+                    is_eos,
+                    torch.ones_like(attn_masked) / n_total_baskets_f,
+                    torch.zeros_like(attn_masked),
+                )
+                calibrated = calibrated + eos_calibrated
+            else:
+                assert isinstance(eos_weight, (int, float)) and 0.0 <= eos_weight <= 1.0
+                eos_kept = eos_weight * eos_orig
+                calibrated = calibrated + eos_kept
+
+        # For float weights, scale content so total sums to 1 (no normalization effect)
+        bos_uses_float = isolate_bos and isinstance(bos_weight, (int, float))
+        eos_uses_float = isolate_eos and isinstance(eos_weight, (int, float))
+        if bos_uses_float or eos_uses_float:
+            bos_final = (
+                float(bos_weight) * bos_attn_value
+                if bos_uses_float
+                else bos_attn_value / n_total_baskets_f
+            )
+            eos_final = (
+                float(eos_weight) * eos_attn_value
+                if eos_uses_float
+                else eos_attn_value / n_total_baskets_f
+            )
+            remaining_for_content = 1.0 - bos_final - eos_final
+            current_content_sum = (
+                calibrated.sum(dim=-1, keepdim=True) - bos_final - eos_final
+            )
+            content_scale = torch.where(
+                current_content_sum > 0,
+                remaining_for_content / current_content_sum,
+                torch.ones_like(current_content_sum),
+            )
+            calibrated = torch.where(
+                is_content.bool(),
+                calibrated * content_scale,
+                calibrated,
+            )
+
         calibrated = calibrated * mask_bk
 
         row_sum = calibrated.sum(dim=-1, keepdim=True)
@@ -1296,6 +1392,19 @@ class FairSentenceTransformer(SentenceTransformer):
         lengths = mask.sum(dim=1)
         return summed / lengths
 
+    def _resolve_isolation_defaults(
+        self,
+        isolate_bos: Optional[bool],
+        isolate_eos: Optional[bool],
+    ) -> Tuple[bool, bool]:
+        if self.pooling_strategy == "mean":
+            default_bos, default_eos = False, False
+        else:
+            default_bos, default_eos = True, True
+        resolved_bos = default_bos if isolate_bos is None else isolate_bos
+        resolved_eos = default_eos if isolate_eos is None else isolate_eos
+        return resolved_bos, resolved_eos
+
     def encode_positionally_fair(
         self,
         sentences: Union[str, List[str]],
@@ -1303,6 +1412,10 @@ class FairSentenceTransformer(SentenceTransformer):
         calib_basket_size: int,
         calib_layers: int,
         calib_strength: float,
+        isolate_bos: Optional[bool] = None,
+        isolate_eos: Optional[bool] = None,
+        bos_weight: Union[float, Literal["equal"]] = "equal",
+        eos_weight: Union[float, Literal["equal"]] = "equal",
         batch_size: int = 32,
         show_progress_bar: bool = False,
         normalize_embeddings: bool = True,
@@ -1313,6 +1426,23 @@ class FairSentenceTransformer(SentenceTransformer):
         assert calib_basket_size > 0
         assert calib_layers > 0
         assert 0.0 <= calib_strength <= 1.0
+
+        resolved_bos, resolved_eos = self._resolve_isolation_defaults(
+            isolate_bos, isolate_eos
+        )
+
+        if isinstance(bos_weight, (int, float)):
+            assert 0.0 <= bos_weight <= 1.0, "bos_weight must be in [0, 1]"
+        else:
+            assert (
+                bos_weight == "equal"
+            ), f"bos_weight must be float or 'equal', got {bos_weight}"
+        if isinstance(eos_weight, (int, float)):
+            assert 0.0 <= eos_weight <= 1.0, "eos_weight must be in [0, 1]"
+        else:
+            assert (
+                eos_weight == "equal"
+            ), f"eos_weight must be float or 'equal', got {eos_weight}"
 
         self._ensure_nnsight_model()
         assert self._nnsight_model is not None and self._num_layers is not None
@@ -1357,7 +1487,10 @@ class FairSentenceTransformer(SentenceTransformer):
                             attention_mask,
                             basket_size=calib_basket_size,
                             strength=calib_strength,
-                            source_mode=self.calib_source_mode,
+                            isolate_bos=resolved_bos,
+                            isolate_eos=resolved_eos,
+                            bos_weight=bos_weight,
+                            eos_weight=eos_weight,
                         )
                         attn.copy_(calibrated)
                     model_output = self._nnsight_model.output.save()
