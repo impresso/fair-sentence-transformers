@@ -1464,12 +1464,39 @@ class FairSentenceTransformer(SentenceTransformer):
             torch.device(device) if device is not None else torch.device(self.device)
         )
 
+        n_isolated = int(resolved_bos) + int(resolved_eos)
+        preflight_enc = self.tokenizer(
+            sentences_list, padding=False, truncation=True, return_tensors=None
+        )
+        content_lens = [len(ids) - n_isolated for ids in preflight_enc["input_ids"]]
+        short_idxs = [i for i, cl in enumerate(content_lens) if cl < calib_basket_size]
+        calib_idxs = [i for i, cl in enumerate(content_lens) if cl >= calib_basket_size]
+
+        if short_idxs:
+            print(
+                f"[Info encode_positionally_fair:] {len(short_idxs)} sample(s) have content "
+                f"length < basket size ({calib_basket_size}), using .encode() fallback"
+            )
+
+        if not calib_idxs:
+            return self.encode(
+                sentences_list,
+                batch_size=batch_size,
+                show_progress_bar=show_progress_bar,
+                normalize_embeddings=normalize_embeddings,
+                device=device,
+                convert_to_numpy=convert_to_numpy,
+                convert_to_tensor=convert_to_tensor,
+            )
+
+        calib_sentences = [sentences_list[i] for i in calib_idxs]
+
         all_embeddings: List[torch.Tensor] = []
-        rng = range(0, len(sentences_list), batch_size)
+        rng = range(0, len(calib_sentences), batch_size)
         iterator = tqdm.tqdm(rng, desc="Encoding (fair)", disable=not show_progress_bar)
         for start in iterator:
-            end = min(start + batch_size, len(sentences_list))
-            chunk = sentences_list[start:end]
+            end = min(start + batch_size, len(calib_sentences))
+            chunk = calib_sentences[start:end]
             enc = self.tokenizer(
                 chunk, padding=True, truncation=True, return_tensors="pt"
             )
@@ -1507,7 +1534,34 @@ class FairSentenceTransformer(SentenceTransformer):
                 pooled = F.normalize(pooled, p=2, dim=1)
             all_embeddings.append(pooled.cpu())
 
-        embeddings = torch.cat(all_embeddings, dim=0)
+        calib_embeddings = torch.cat(all_embeddings, dim=0)
+        assert calib_embeddings.shape[0] == len(calib_idxs)
+
+        if not short_idxs:
+            embeddings = calib_embeddings
+        else:
+            short_sentences = [sentences_list[i] for i in short_idxs]
+            short_embeddings = self.encode(
+                short_sentences,
+                batch_size=batch_size,
+                show_progress_bar=False,
+                normalize_embeddings=normalize_embeddings,
+                device=device,
+                convert_to_numpy=False,
+                convert_to_tensor=True,
+            )
+            assert short_embeddings.shape[0] == len(short_idxs)
+            D = calib_embeddings.shape[1]
+            assert short_embeddings.shape[1] == D
+            embeddings = torch.empty(
+                (len(sentences_list), D), dtype=calib_embeddings.dtype
+            )
+            for out_i, orig_i in enumerate(calib_idxs):
+                embeddings[orig_i] = calib_embeddings[out_i]
+            for out_i, orig_i in enumerate(short_idxs):
+                embeddings[orig_i] = short_embeddings[out_i]
+
+        assert embeddings.shape[0] == len(sentences_list)
         if convert_to_tensor:
             return embeddings
         if convert_to_numpy:
