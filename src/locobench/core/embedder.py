@@ -1273,46 +1273,49 @@ class FairSentenceTransformer(SentenceTransformer):
         n_content_baskets_f = n_content_baskets.to(dtype=attn.dtype).view(B, 1, 1, 1)
         n_total_baskets_f = n_total_baskets.to(dtype=attn.dtype).view(B, 1, 1, 1)
 
-        calibrated_content = torch.where(
+        calibrated = torch.where(
             denom > 0,
             (content_attn / denom) * (1.0 / n_total_baskets_f),
             torch.zeros_like(content_attn),
         )
 
-        calibrated = calibrated_content.clone()
-
-        bos_orig = torch.where(is_bos, attn_masked, torch.zeros_like(attn_masked))
-        eos_orig = torch.where(is_eos, attn_masked, torch.zeros_like(attn_masked))
-        bos_attn_value = bos_orig.sum(dim=-1, keepdim=True)
-        eos_attn_value = eos_orig.sum(dim=-1, keepdim=True)
+        bos_attn_value = (
+            (attn_masked * is_bos.to(attn.dtype)).sum(dim=-1, keepdim=True)
+            if isolate_bos
+            else None
+        )
+        eos_attn_value = (
+            (attn_masked * is_eos.to(attn.dtype)).sum(dim=-1, keepdim=True)
+            if isolate_eos
+            else None
+        )
 
         if isolate_bos:
             if bos_weight == "equal":
-                bos_calibrated = torch.where(
+                calibrated = calibrated + torch.where(
                     is_bos,
                     torch.ones_like(attn_masked) / n_total_baskets_f,
                     torch.zeros_like(attn_masked),
                 )
-                calibrated = calibrated + bos_calibrated
             else:
                 assert isinstance(bos_weight, (int, float)) and 0.0 <= bos_weight <= 1.0
-                bos_kept = bos_weight * bos_orig
-                calibrated = calibrated + bos_kept
+                calibrated = calibrated + bos_weight * attn_masked * is_bos.to(
+                    attn.dtype
+                )
 
         if isolate_eos:
             if eos_weight == "equal":
-                eos_calibrated = torch.where(
+                calibrated = calibrated + torch.where(
                     is_eos,
                     torch.ones_like(attn_masked) / n_total_baskets_f,
                     torch.zeros_like(attn_masked),
                 )
-                calibrated = calibrated + eos_calibrated
             else:
                 assert isinstance(eos_weight, (int, float)) and 0.0 <= eos_weight <= 1.0
-                eos_kept = eos_weight * eos_orig
-                calibrated = calibrated + eos_kept
+                calibrated = calibrated + eos_weight * attn_masked * is_eos.to(
+                    attn.dtype
+                )
 
-        # For float weights, scale content so total sums to 1 (no normalization effect)
         bos_uses_float = isolate_bos and isinstance(bos_weight, (int, float))
         eos_uses_float = isolate_eos and isinstance(eos_weight, (int, float))
         if bos_uses_float or eos_uses_float:
@@ -1353,13 +1356,13 @@ class FairSentenceTransformer(SentenceTransformer):
         denom_rows = torch.where(q_mask_b, row_sum, torch.ones_like(row_sum))
         normalized = torch.where(q_mask_b, calibrated / denom_rows, attn_masked)
 
-        orig_masked = attn * mask_bk
-        blended = torch.where(
+        if strength == 1.0:
+            return normalized
+        return torch.where(
             q_mask_b,
-            normalized * strength + orig_masked * (1.0 - strength),
-            orig_masked,
+            normalized * strength + attn_masked * (1.0 - strength),
+            attn_masked,
         )
-        return blended
 
     def _extract_last_hidden_state(self, model_output: Any) -> torch.Tensor:
         if hasattr(model_output, "last_hidden_state"):
@@ -1510,29 +1513,35 @@ class FairSentenceTransformer(SentenceTransformer):
                 input_ids = input_ids.to(use_device)
                 attention_mask = attention_mask.to(use_device)
 
-            with self._nnsight_model.trace() as tracer:
-                with tracer.invoke(input_ids=input_ids, attention_mask=attention_mask):
-                    layer_start = max(0, self._num_layers - calib_layers)
-                    for idx in range(layer_start, self._num_layers):
-                        attn = self._resolve_attention_softmax(idx)
-                        calibrated = self._calibrate_attention(
-                            attn,
-                            attention_mask,
-                            basket_size=calib_basket_size,
-                            strength=calib_strength,
-                            isolate_bos=resolved_bos,
-                            isolate_eos=resolved_eos,
-                            bos_weight=bos_weight,
-                            eos_weight=eos_weight,
-                        )
-                        attn.copy_(calibrated)
-                    model_output = self._nnsight_model.output.save()
+            with torch.no_grad():
+                with self._nnsight_model.trace() as tracer:
+                    with tracer.invoke(
+                        input_ids=input_ids, attention_mask=attention_mask
+                    ):
+                        layer_start = max(0, self._num_layers - calib_layers)
+                        for idx in range(layer_start, self._num_layers):
+                            attn = self._resolve_attention_softmax(idx)
+                            calibrated = self._calibrate_attention(
+                                attn,
+                                attention_mask,
+                                basket_size=calib_basket_size,
+                                strength=calib_strength,
+                                isolate_bos=resolved_bos,
+                                isolate_eos=resolved_eos,
+                                bos_weight=bos_weight,
+                                eos_weight=eos_weight,
+                            )
+                            attn.copy_(calibrated)
+                        model_output = self._nnsight_model.output.save()
 
             hidden = self._extract_last_hidden_state(model_output)
             pooled = self._pool(hidden, attention_mask)
             if normalize_embeddings:
                 pooled = F.normalize(pooled, p=2, dim=1)
             all_embeddings.append(pooled.cpu())
+            del model_output, hidden, pooled, input_ids, attention_mask
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         calib_embeddings = torch.cat(all_embeddings, dim=0)
         assert calib_embeddings.shape[0] == len(calib_idxs)
