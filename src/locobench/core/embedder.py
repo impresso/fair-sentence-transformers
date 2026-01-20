@@ -987,6 +987,7 @@ class FairSentenceTransformer(SentenceTransformer):
         attention_path_override: Optional[Callable[[Any, int], Any]] = None,
         pooling_override: Optional[Literal["cls", "mean", "last"]] = None,
         calibrated_tokens_override: Optional[Literal["cls", "all", "last"]] = None,
+        padding_side_override: Optional[Literal["left", "right"]] = None,
         trust_remote_code: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -998,6 +999,7 @@ class FairSentenceTransformer(SentenceTransformer):
         self._config = AutoConfig.from_pretrained(
             model_name_or_path, trust_remote_code=trust_remote_code
         )
+        self._padding_side_override = padding_side_override
         self.padding_side = self._detect_padding_side()
 
         original_class_name = self.__class__.__name__
@@ -1043,6 +1045,10 @@ class FairSentenceTransformer(SentenceTransformer):
         )
 
     def _detect_padding_side(self) -> Literal["left", "right"]:
+        override = self._padding_side_override
+        if override is not None:
+            assert override in ("left", "right")
+            return override
         model_type = str(getattr(self._config, "model_type", "")).lower()
         if any(name in model_type for name in self.DECODER_ARCH_NAMES):
             return "left"
