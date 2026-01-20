@@ -1408,6 +1408,10 @@ class FairSentenceTransformer(SentenceTransformer):
     ) -> Tuple[bool, bool]:
         if self.pooling_strategy == "mean":
             default_bos, default_eos = False, False
+        elif self.pooling_strategy == "cls":
+            default_bos, default_eos = True, False
+        elif self.pooling_strategy == "last":
+            default_bos, default_eos = True, True
         else:
             default_bos, default_eos = True, True
         resolved_bos = default_bos if isolate_bos is None else isolate_bos
