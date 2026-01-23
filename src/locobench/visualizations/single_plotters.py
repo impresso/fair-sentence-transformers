@@ -194,11 +194,15 @@ class PositionSimilaritySinglePlotter:
         # Set x-axis ticks to be integers
         ax.set_xticks(positions)
 
-        ax.yaxis.set_major_locator(MultipleLocator(0.1))
+        ax.set_yticks([0.4, 0.6, 0.8, 1.0])
 
         # Set y-axis limits if provided
         if ylim is not None:
-            ax.set_ylim(ylim)
+            ax.set_ylim((ylim[0], max(ylim[1], 1.0)))
+        else:
+            bottom, top = ax.get_ylim()
+            if top < 1.0:
+                ax.set_ylim((bottom, 1.0))
 
         # Format y-axis to show appropriate precision and prevent duplicate labels
         # Use more decimal places if the y-range is small to avoid duplicate tick labels

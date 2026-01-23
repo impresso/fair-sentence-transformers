@@ -165,7 +165,8 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
             paths=paths,
             analysis_type=self.analysis_type,
             document_embedding_type=self.document_embedding_type,
-            title="Similarity between Document-Level Embedding and Standalone Segment Embeddings",
+            # title="Similarity between Document-Level Embedding and Standalone Segment Embeddings",
+            title="Similarity D-Level Embedding and S-Level Embeddings",
             pooling_legend_type="segment_standalone_and_document",
             subplotter=position_similarity_single_plotter.plot_position_similarities_in_subplot,
             pooling_strategy_segment_standalone=pooling_strategy_segment_standalone,
@@ -186,6 +187,7 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
         self,
         paths: List[str | Path],
         model_pooling_strats: Dict[str, str],
+        merge_latechunk_jina: bool = False,
         show_segment_lengths: bool = False,
         show_lengths: bool = False,
         figure_width: int = 15,
@@ -239,12 +241,14 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                 model_pooling_strats=model_pooling_strats,
                 analysis_type=self.analysis_type,
                 document_embedding_type=self.document_embedding_type,
-                title="Similarity between Document-Level Embedding and Standalone Segment Embeddings",
+                # title="Similarity between Document-Level Embedding and Standalone Segment Embeddings",
+                title="Similarity D-Level Embedding and S-Level Embeddings",
                 pooling_legend_type="segment_standalone_and_document",
                 subplotter=multi_model_single_plotter,  # Pass the object, not the method
                 pooling_strategy_segment_standalone="cls",  # Will be overridden by model-specific strategies
                 pooling_strategy_document="cls",  # Will be overridden by model-specific strategies
                 matryoshka_dimensions=None,  # We don't use matryoshka for multi-model plot
+                merge_latechunk_jina=merge_latechunk_jina,
                 show_segment_lengths=show_segment_lengths,
                 show_lengths=show_lengths,
                 figure_width=figure_width,
@@ -254,6 +258,7 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                 show_plot=show_plot,
                 return_full_results=return_full_results,
                 single_model_mode=single_model_mode,
+                global_ylim_override=(0.28, 1.0),
             )
 
         # Split the inputs and ensure identical formatting across all figures
@@ -292,13 +297,19 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
             all_y_values.extend(res["position_ci_lower"])
             all_y_values.extend(res["position_ci_upper"])
 
-        global_ylim: Optional[Tuple[float, float]] = None
-        if all_y_values:
-            y_min = min(all_y_values)
-            y_max = max(all_y_values)
-            y_range = y_max - y_min
-            margin = y_range * 0.05
-            global_ylim = (y_min - margin, y_max + margin)
+            if merge_latechunk_jina and model_name == "jinaai/jina-embeddings-v3":
+                latechunk_res = doc_seg_analyzer.run_position_analysis(
+                    path=p,
+                    document_embedding_type="latechunk-segment",
+                    pooling_strategy_segment_standalone=pooling,
+                    pooling_strategy_document="cls",
+                    matryoshka_dimensions=None,
+                )
+                all_y_values.extend(latechunk_res["position_means"])
+                all_y_values.extend(latechunk_res["position_ci_lower"])
+                all_y_values.extend(latechunk_res["position_ci_upper"])
+
+        global_ylim: Optional[Tuple[float, float]] = (0.28, 1.0)
 
         # Pre-compute a global token length ylim if token lengths are shown
         global_token_ylim: Optional[Tuple[float, float]] = None
@@ -308,11 +319,9 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
             for v in token_len_results.values():
                 token_vals.extend(v.get("position_means", []))
             if token_vals:
-                tmin = min(token_vals)
                 tmax = max(token_vals)
-                tr = tmax - tmin
-                tmargin = tr * 0.05
-                global_token_ylim = (max(0, tmin - tmargin), tmax + tmargin)
+                tmargin = tmax * 0.05
+                global_token_ylim = (0, tmax + tmargin)
 
         # Run one figure per group using the same ylim/token_ylim
         merged_results: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -333,12 +342,14 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                 model_pooling_strats=model_pooling_strats,
                 analysis_type=self.analysis_type,
                 document_embedding_type=self.document_embedding_type,
-                title="Similarity between Document-Level Embedding and Standalone Segment Embeddings",
+                # title="Similarity between Document-Level Embedding and Standalone Segment Embeddings",
+                title="Similarity D-Level Embedding and S-Level Embeddings",
                 pooling_legend_type="segment_standalone_and_document",
                 subplotter=multi_model_single_plotter,
                 pooling_strategy_segment_standalone="cls",
                 pooling_strategy_document="cls",
                 matryoshka_dimensions=None,
+                merge_latechunk_jina=merge_latechunk_jina,
                 show_segment_lengths=show_segment_lengths,
                 show_lengths=show_lengths,
                 figure_width=figure_width,
@@ -550,14 +561,8 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                 all_y_values.extend(res["position_ci_lower"])
                 all_y_values.extend(res["position_ci_upper"])
 
-        # Global y-limits with margin
-        global_ylim: Optional[Tuple[float, float]] = None
-        if all_y_values:
-            y_min = min(all_y_values)
-            y_max = max(all_y_values)
-            y_range = y_max - y_min
-            margin = y_range * 0.05
-            global_ylim = (y_min - margin, y_max + margin)
+        # Global y-limits fixed for consistent scaling across figures
+        global_ylim: Optional[Tuple[float, float]] = (0.28, 1.0)
 
         # Global token y-limits if required
         global_token_ylim: Optional[Tuple[float, float]] = None
@@ -567,11 +572,9 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
             for v in token_len_results.values():
                 token_vals.extend(v.get("position_means", []))
             if token_vals:
-                tmin = min(token_vals)
                 tmax = max(token_vals)
-                tr = tmax - tmin
-                tmargin = tr * 0.05
-                global_token_ylim = (max(0, tmin - tmargin), tmax + tmargin)
+                tmargin = tmax * 0.05
+                global_token_ylim = (0, tmax + tmargin)
 
         # Custom subplotter that plots all calibrations for a config using precomputed results
         class _CalibrationSubplotter:
@@ -700,8 +703,13 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                     pad=POS_LABEL_PAD,
                 )
                 if self._ylim is not None:
-                    ax.set_ylim(self._ylim)
-                ax.yaxis.set_major_locator(MultipleLocator(0.2))
+                    ax.set_ylim((self._ylim[0], max(self._ylim[1], 1.0)))
+                else:
+                    bottom, top = ax.get_ylim()
+                    if top < 1.0:
+                        ax.set_ylim((bottom, 1.0))
+
+                ax.set_yticks([0.4, 0.6, 0.8, 1.0])
                 ax.yaxis.set_minor_locator(MultipleLocator(0.1))
                 if self._ylim is not None:
                     y_range = self._ylim[1] - self._ylim[0]
@@ -894,6 +902,7 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
         pooling_strategy_segment_standalone: str = "cls",
         pooling_strategy_document: str = "cls",
         matryoshka_dimensions: Optional[List[int]] = None,
+        merge_latechunk_jina: bool = False,
         show_segment_lengths: bool = False,
         show_lengths: bool = False,
         figure_width: int = 15,
@@ -938,6 +947,10 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
         all_model_results = {}
         all_y_values = []
 
+        latechunk_overlay_label = "jina-v3"
+        latechunk_overlay_color = "lightsalmon"
+        latechunk_overlay_results: Dict[Tuple[int, str], Dict[str, Any]] = {}
+
         for config_key, path_model_pairs in config_groups.items():
             for path, model_name in path_model_pairs:
                 pooling_strategy = model_pooling_strats.get(model_name, "cls")
@@ -959,6 +972,29 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                 all_y_values.extend(result["position_ci_lower"])
                 all_y_values.extend(result["position_ci_upper"])
 
+            if merge_latechunk_jina:
+                jina_paths = [
+                    (p, m)
+                    for (p, m) in path_model_pairs
+                    if m == "jinaai/jina-embeddings-v3"
+                ]
+                assert (
+                    len(jina_paths) == 1
+                ), f"Expected exactly one Jina path for config_key={config_key}, got {len(jina_paths)}"
+                jina_path, jina_model_name = jina_paths[0]
+                jina_pooling = model_pooling_strats.get(jina_model_name, "cls")
+                latechunk_result = doc_seg_analyzer.run_position_analysis(
+                    path=jina_path,
+                    document_embedding_type="latechunk-segment",
+                    pooling_strategy_segment_standalone=jina_pooling,
+                    pooling_strategy_document="cls",
+                    matryoshka_dimensions=None,
+                )
+                latechunk_overlay_results[config_key] = latechunk_result
+                all_y_values.extend(latechunk_result["position_means"])
+                all_y_values.extend(latechunk_result["position_ci_lower"])
+                all_y_values.extend(latechunk_result["position_ci_upper"])
+
         # Calculate global y-limits with margin (or use override)
         if global_ylim_override is not None:
             global_ylim = global_ylim_override
@@ -972,6 +1008,23 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
             else:
                 global_ylim = None
 
+        # Calculate global token y-limits (or use override)
+        if global_token_ylim_override is not None:
+            global_token_ylim = global_token_ylim_override
+        elif show_lengths:
+            token_len_results = compute_position_token_lengths(paths)
+            token_vals: List[float] = []
+            for v in token_len_results.values():
+                token_vals.extend(v.get("position_means", []))
+            if token_vals:
+                tmax = max(token_vals)
+                tmargin = tmax * 0.05
+                global_token_ylim = (0, tmax + tmargin)
+            else:
+                global_token_ylim = None
+        else:
+            global_token_ylim = None
+
         # Create a custom subplotter that uses pre-computed results
         class CustomMultiModelSubplotter:
             def __init__(
@@ -982,6 +1035,9 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                 model_pooling_strats,
                 global_ylim,
                 global_token_ylim,
+                latechunk_overlay_results,
+                latechunk_overlay_label,
+                latechunk_overlay_color,
             ):
                 self.original_subplotter_obj = original_subplotter_obj
                 self.all_model_results = all_model_results
@@ -989,6 +1045,9 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                 self.model_pooling_strats = model_pooling_strats
                 self.global_ylim = global_ylim
                 self.global_token_ylim = global_token_ylim
+                self.latechunk_overlay_results = latechunk_overlay_results
+                self.latechunk_overlay_label = latechunk_overlay_label
+                self.latechunk_overlay_color = latechunk_overlay_color
 
             def plot_position_similarities_in_subplot(self, ax, base_result, **kwargs):
                 # Override ylim with our global one
@@ -1002,6 +1061,9 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
                     self.all_model_results,
                     self.config_groups,
                     self.model_pooling_strats,
+                    latechunk_overlay_results=self.latechunk_overlay_results,
+                    latechunk_overlay_label=self.latechunk_overlay_label,
+                    latechunk_overlay_color=self.latechunk_overlay_color,
                     **kwargs,
                 )
 
@@ -1011,7 +1073,10 @@ class DocumentLevel2SegmentStandaloneSimPlotter:
             config_groups,
             model_pooling_strats,
             global_ylim,
-            global_token_ylim_override,
+            global_token_ylim,
+            latechunk_overlay_results if merge_latechunk_jina else None,
+            latechunk_overlay_label,
+            latechunk_overlay_color,
         )
 
         # Run analysis for each unique config (use first model for each config as base)
@@ -1162,11 +1227,9 @@ class SegmentLatechunk2SegmentStandaloneSimPlotter:
             for v in token_len_results.values():
                 token_vals.extend(v.get("position_means", []))
             if token_vals:
-                tmin = min(token_vals)
                 tmax = max(token_vals)
-                tr = tmax - tmin
-                tmargin = tr * 0.05
-                global_token_ylim = (max(0, tmin - tmargin), tmax + tmargin)
+                tmargin = tmax * 0.05
+                global_token_ylim = (0, tmax + tmargin)
 
         # Wrapper subplotter to enforce global limits
         class _FixedLimitsSubplotter:
@@ -2037,6 +2100,31 @@ def analyze_and_plot_multiple_results(
                         label=model_name,
                     )
                     handles.append(model_line)
+
+                overlay_results = getattr(
+                    subplotter.__self__, "latechunk_overlay_results", None
+                )
+                overlay_label = getattr(
+                    subplotter.__self__, "latechunk_overlay_label", None
+                )
+                overlay_color = getattr(
+                    subplotter.__self__, "latechunk_overlay_color", None
+                )
+                if overlay_results is not None:
+                    assert (
+                        overlay_label is not None and overlay_color is not None
+                    ), "Latechunk overlay legend requires label and color."
+                    handles.append(
+                        mlines.Line2D(
+                            [],
+                            [],
+                            color=overlay_color,
+                            marker="o",
+                            linestyle="-",
+                            linewidth=LEGEND_LINEWIDTH,
+                            label=overlay_label,
+                        )
+                    )
             else:
                 # Always include full embedding
                 mean_line = mlines.Line2D(
@@ -2393,6 +2481,11 @@ class MultiModelPositionSimilaritySinglePlotter:
         all_model_results: Dict[Tuple, Dict[str, Any]],
         config_groups: Dict[Tuple, List[Tuple]],
         model_pooling_strats: Dict[str, str],
+        latechunk_overlay_results: Optional[
+            Dict[Tuple[int, str], Dict[str, Any]]
+        ] = None,
+        latechunk_overlay_label: str = "jina-v3",
+        latechunk_overlay_color: str = "lightsalmon",
         show_title: bool = True,
         compact: bool = True,
         ylim: Optional[Tuple[float, float]] = None,
@@ -2485,6 +2578,37 @@ class MultiModelPositionSimilaritySinglePlotter:
                         )
                         ax.add_patch(rect)
 
+        if (
+            latechunk_overlay_results is not None
+            and config_key in latechunk_overlay_results
+        ):
+            overlay = latechunk_overlay_results[config_key]
+            assert len(overlay["position_means"]) == len(
+                positions
+            ), "Latechunk overlay must match base positions length."
+            ax.plot(
+                positions,
+                overlay["position_means"],
+                "o-",
+                color=latechunk_overlay_color,
+                linewidth=PLOT_LINEWIDTH,
+                markersize=PLOT_MARKERSIZE,
+                label=latechunk_overlay_label,
+            )
+            for pos, ci_lower, ci_upper in zip(
+                positions,
+                overlay["position_ci_lower"],
+                overlay["position_ci_upper"],
+            ):
+                rect = plt.Rectangle(
+                    (pos - 0.4 / 2, ci_lower),
+                    0.4,
+                    ci_upper - ci_lower,
+                    color=latechunk_overlay_color,
+                    alpha=0.2,
+                )
+                ax.add_patch(rect)
+
         # Add labels (compact for subplots)
         ax.set_xlabel(
             "Position",
@@ -2525,10 +2649,13 @@ class MultiModelPositionSimilaritySinglePlotter:
 
         # Set y-axis limits if provided
         if ylim is not None:
-            ax.set_ylim(ylim)
+            ax.set_ylim((ylim[0], max(ylim[1], 1.0)))
+        else:
+            bottom, top = ax.get_ylim()
+            if top < 1.0:
+                ax.set_ylim((bottom, 1.0))
 
-        # Major ticks remain at 0.2, minor ticks provide 0.1 grid spacing
-        ax.yaxis.set_major_locator(MultipleLocator(0.2))
+        ax.set_yticks([0.4, 0.6, 0.8, 1.0])
         ax.yaxis.set_minor_locator(MultipleLocator(0.1))
 
         # Format y-axis to show appropriate precision and prevent duplicate labels
