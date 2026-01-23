@@ -52,7 +52,7 @@ poetry run python <script> --config <path-to-config.json>
 3) Create parallel indices (concat and standalone) with length constraints
 4) Compute embeddings using the indices (monolingual or mixed-language documents)
 
-Convenience: generate many embedding configs at once with `create_wiki_parallel_configs.sh`, then run them all with `run_all_configs.sh`.
+Convenience: generate many embedding configs at once with `create_wiki_parallel_configs.sh`, then run them all with `REPL_run_all_configs.sh`.
 
 ---
 
@@ -62,7 +62,7 @@ Convenience: generate many embedding configs at once with `create_wiki_parallel_
 
 We rely on the title matching tool from https://github.com/clab/wikipedia-parallel-titles. You can either:
 
-- One-shot wrapper: run all steps with `run_wiki_parallel_steps.sh` (recommended), or
+- One-shot wrapper: run all steps with `REPL_run_wiki_parallel_steps.sh` (recommended), or
 - Execute the single steps manually (retained below for transparency and customization).
 
 The wrapper produces a Hugging Face Dataset on disk with one split per language. The folder name is user-defined; throughout this README we refer to it as `data/wiki_parallel_en_de_hi_it_ko_zh/` as an example. If you use a different name, adjust the paths in later configs accordingly.
@@ -70,7 +70,7 @@ The wrapper produces a Hugging Face Dataset on disk with one split per language.
 #### One-shot wrapper
 
 ```bash
-./run_wiki_parallel_steps.sh
+./REPL_run_wiki_parallel_steps.sh
 ```
 
 This runs the following in sequence (versions and languages can be changed in the script):
@@ -104,7 +104,7 @@ These are the same steps embedded in the wrapper script:
 5. Download articles via IDs and via title matching
 6. Unify the datasets into one parallel set
 
-If you prefer running single steps, see `run_wiki_parallel_steps.sh` for the exact commands and adjust languages or dump version as needed.
+If you prefer running single steps, see `REPL_run_wiki_parallel_steps.sh` for the exact commands and adjust languages or dump version as needed.
 
 ### Tokenize the dataset
 
@@ -244,7 +244,7 @@ If you evaluate multiple models or language pairs, keep indices fixed and only s
 
 ### Attention calibration
 
-Attention calibration re-weights attention scores at inference time, with the goal of distributing representational capacity more evenly across the full sequence. The same config files still work with `run_all_configs.sh` because calibration options are handled by `compute_embeddings.py`.
+Attention calibration re-weights attention scores at inference time, with the goal of distributing representational capacity more evenly across the full sequence. The same config files still work with `REPL_run_all_configs.sh` because calibration options are handled by `compute_embeddings.py`.
 
 Keys (top-level apply to both embedders; you can also use per-embedder overrides, i.e., different settings for standalone embeddings and document embeddings):
 - `apply_attn_calibration` (bool): enable/disable calibration.
@@ -293,7 +293,7 @@ Running:
 - Place calibrated configs in a folder and execute:
 
 ```bash
-./run_all_configs.sh <config_folder>
+./REPL_run_all_configs.sh <config_folder>
 ```
 
 or run a single config directly via:
@@ -317,13 +317,13 @@ For Experiment 3 we analyze how attention mass distributes across long concatena
 Use the pre-wired script:
 
 ```bash
-./run_attn_analyzer.sh [--sizes "128 64"|--sizes=128,64|-s "128"] <ll> [ll]
+./REPL_run_attn_analyzer.sh [--sizes "128 64"|--sizes=128,64|-s "128"] <ll> [ll]
 ```
 
 Where:
 - `<ll> [ll]` are one or two ISO-639-1 language codes (e.g., `en` or `en de`).
 - `--sizes`/`-s` specifies basket sizes (space- or comma-separated). Default: 128.
-- You can also set `BASKET_SIZES` env var (space/comma-separated), e.g., `BASKET_SIZES="128 64" ./run_attn_analyzer.sh en`.
+- You can also set `BASKET_SIZES` env var (space/comma-separated), e.g., `BASKET_SIZES="128 64" ./REPL_run_attn_analyzer.sh en`.
 
 Language convention for mixed-language documents:
 - `target_lang` is the language of the first segment in each concatenated document.
@@ -349,13 +349,13 @@ Example invocations:
 
 ```bash
 # Monolingual English, default basket size 128
-./run_attn_analyzer.sh en
+./REPL_run_attn_analyzer.sh en
 
 # Mixed-language: first segment in German, remaining in English, basket sizes 256 and 128
-./run_attn_analyzer.sh --sizes 256,128 de en
+./REPL_run_attn_analyzer.sh --sizes 256,128 de en
 
 # Monolingual with sizes from environment
-BASKET_SIZES="128 64" ./run_attn_analyzer.sh en
+BASKET_SIZES="128 64" ./REPL_run_attn_analyzer.sh en
 ```
 
 What it computes (by default):
@@ -629,7 +629,7 @@ Notes:
 - After generating configs, you can run them all with:
 
 ```bash
-./run_all_configs.sh <output_folder>
+./REPL_run_all_configs.sh <output_folder>
 ```
 
 ### Adding new models/tokenizers
