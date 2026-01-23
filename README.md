@@ -22,27 +22,52 @@ This repository accompanies our [preprint(under-review)](link_not_yet_existent) 
 
 ## Fair Sentence Transformers
 
-Within our work, we introduce an inference-time attention calibration we wrap this as an extension of Sentence Transformers, named Fair Sentence Transformers. Fair Sentence Transformers goal is to:
+We introduce an inference-time attention calibration method, implemented as an extension of Sentence Transformers called Fair Sentence Transformers. This tool aims to:
 
-1. Include different inference-time calibration techniques aimed to maximize fairness within embedding models.
-2. Enable support of existing and future embedding models by creating "Generic" implementations that can be configured to each specific model's attributes.
+1. Provide a Wrapper Class for inference-time calibration techniques that improve fairness in embedding models.
+2. Support existing and future embedding model releases through generic implementations configurable to each model's attributes.
 
-### Example use:
+### Setup and Example use:
 
+```bash
+poetry install
+```
+
+```python
+from src.locobench.core.fair_sentence_transformer import FairSentenceTransformer
+ 
+input_texts = [
+    "What is the capital of Switzerland?",
+    "How to make an omelette?",
+    "Wie viele Einwohner hat Deutschland?",
+]
+ 
+model_name_or_path = "Alibaba-NLP/gte-multilingual-base"
+model = FairSentenceTransformer(model_name_or_path)
+ 
+# Standard SentenceTransformer embeddings
+embeddings = model.encode(input_texts)  # shape: (3, 768)
+ 
+# Fair SentenceTransformer embeddings
+fair_embeddings = model.encode_positionally_fair(
+    input_texts,
+    calib_strength=0.5,
+    calib_basket_size=128,
+    calib_layers=6,
+)  # shape: (3, 768)
+```
+pip install coming soon
 
 ### Supported Models and Methods
 
-encode_positionally_fair - Inference time attention calibration to represent input from all positions
+**encode_positionally_fair** - Inference-time attention calibration to ensure fair representation of input from all positions.
 
-Tested Models:
+**Tested Models:**
+- [Alibaba-NLP/gte-multilingual-base](https://huggingface.co/Alibaba-NLP/gte-multilingual-base)
+- [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)
+- Qwen3-Embedding Family: [0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B), [4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), [8B](https://huggingface.co/Qwen/Qwen3-Embedding-8B)
 
-[Alibaba-NLP/gte-multilingual-base](https://huggingface.co/Alibaba-NLP/gte-multilingual-base)
-
-[BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)
-
-Qwen3-Embedding Family: [0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B), [4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), [8B](https://huggingface.co/Qwen/Qwen3-Embedding-8B)
-
-Supported - Our current implementations can very easily support more models, just requires configuration and testing.
+**Extensibility:** Our implementation can support additional models with a configuration and quick test of new additions. Feel free put a pull request with your favourite model.
 
 ---
 
