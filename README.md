@@ -1,10 +1,10 @@
-# [Information Representation Fairness in Long-Document Embeddings: The Peculiar Interaction of Positional and Language Bias](link_not_yet_existent) - FairSentenceTransformers and Replication ![License: AGPLV3+](https://img.shields.io/badge/License-AGPLV3+-brightgreen.svg) 
+# [Information Representation Fairness in Long-Document Embeddings: The Peculiar Interaction of Positional and Language Bias](https://arxiv.org/abs/2601.16934) - FairSentenceTransformers and Replication ![License: AGPLV3+](https://img.shields.io/badge/License-AGPLV3+-brightgreen.svg) 
 
 ---
 
 ## Overview
 
-This repository accompanies our [preprint(under-review)](link_not_yet_existent) source code for the examination of positional bias in long documents of multilingual embedding models.
+This repository accompanies our [preprint(under review)](https://arxiv.org/abs/2601.16934) with source code for the examination of positional bias in long documents of multilingual embedding models and the fair-sentence-transformers extension.
 
 ---
 
@@ -80,7 +80,15 @@ To fully replicate our results, please follow the instructions decipited in our 
 If you use these resources, please cite our paper:
 
 ```bibtex
-ARXIV bibtex TO BE ADDED
+@misc{schuhmacher2026informationrepresentationfairnesslongdocument,
+      title={Information Representation Fairness in Long-Document Embeddings: The Peculiar Interaction of Positional and Language Bias}, 
+      author={Elias Schuhmacher and Andrianos Michail and Juri Opitz and Rico Sennrich and Simon Clematide},
+      year={2026},
+      eprint={2601.16934},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2601.16934}, 
+}
 ```
 
 ## About Impresso
