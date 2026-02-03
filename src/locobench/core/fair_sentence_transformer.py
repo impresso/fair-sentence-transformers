@@ -182,6 +182,7 @@ class FairSentenceTransformer(SentenceTransformer):
         resolver = self._attention_path_override
         if resolver is None:
             resolver = self._default_attention_path(self.model_name_or_path)
+            self._attention_path_override = resolver # update here.
         assert (
             resolver is not None
         ), f"No attention path resolver for {self.model_name_or_path}"
