@@ -1,4 +1,4 @@
-"""Shared plotting configuration constants for LoCoBench visualizations."""
+"""Shared plotting configuration constants for fair_sentence_transformers visualizations."""
 
 from __future__ import annotations
 

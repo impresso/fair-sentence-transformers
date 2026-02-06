@@ -1,10 +1,10 @@
 [tool.poetry]
-name = "locobench"
+name = "fair_sentence_transformers"
 version = "0.1.0"
 description = "A workbench and Benchmarking framework for Long-Context text embedding models and their positional biases"
 authors = ["Elias Schuhmacher <eliassebastian.schuhmacher@uzh.ch>"]
 readme = "README.md"
-packages = [{include = "locobench", from = "src"}]
+packages = [{include = "fair_sentence_transformers", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.15"
@@ -25,7 +25,7 @@ sentence-transformers = "^5.2.0"
 pytest = "^8.2.0"
 
 [tool.poetry.scripts]
-# run-embedding-experiment = "locobench.scripts.run_experiment:main"
+# run-embedding-experiment = "fair_sentence_transformers.scripts.run_experiment:main"
 
 [build-system]
 requires = ["poetry-core"]

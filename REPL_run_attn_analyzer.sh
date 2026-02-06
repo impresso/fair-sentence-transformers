@@ -108,7 +108,7 @@ run_analyzer_guarded() {
 	local args=("$@")
 
 	echo "$label"
-	if ! poetry run python -m locobench.attention.attention_analyzer "${args[@]}"; then
+	if ! poetry run python -m fair_sentence_transformers.attention.attention_analyzer "${args[@]}"; then
 		echo "✗ Failed: ${label}" >&2
 		# Record config + full CLI for later summary
 		FAILED_RUNS+=("${CONFIG_PATH} :: ${args[*]}")
@@ -142,7 +142,7 @@ for i in 1 2 3; do
 	done
 
 	# echo "${i}; all tokens"
-	# poetry run python -m locobench.attention.attention_analyzer --config "${CONFIG_PATH}" --analysis_mode baskets --basket_size 128 --batch_size 1 --exclude_incoming
+	# poetry run python -m fair_sentence_transformers.attention.attention_analyzer --config "${CONFIG_PATH}" --analysis_mode baskets --basket_size 128 --batch_size 1 --exclude_incoming
 done
 
 # Summary of failures

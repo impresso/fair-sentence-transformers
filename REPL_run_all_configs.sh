@@ -29,7 +29,7 @@ if [ ! -d "$CONFIG_FOLDER" ]; then
 fi
 
 # Base script path
-SCRIPT_PATH="src/locobench/scripts/compute_embeddings.py"
+SCRIPT_PATH="src/fair_sentence_transformers/scripts/compute_embeddings.py"
 
 # Find all JSON config files in the folder
 CONFIG_FILES=($(find "$CONFIG_FOLDER" -name "*.json" -type f | sort))

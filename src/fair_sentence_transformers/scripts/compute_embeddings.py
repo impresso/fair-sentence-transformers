@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Embedding Computation Script for LoCoBench
+Embedding Computation Script for fair_sentence_transformers
 
 This script computes embeddings for tokenized documents based on
 configuration parameters. It handles both standalone and late-chunking
@@ -26,10 +26,10 @@ project_root = str(Path(__file__).parent.parent.parent.parent.absolute())
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from locobench.core.document_handler import DocumentHandler
-from locobench.core.embedder import StandaloneEmbedder, LateChunkingEmbedder
-from locobench.core.experiment_handler import create_concatenation_indices
-from locobench.utils.embedding_io import (
+from fair_sentence_transformers.core.document_handler import DocumentHandler
+from fair_sentence_transformers.core.embedder import StandaloneEmbedder, LateChunkingEmbedder
+from fair_sentence_transformers.core.experiment_handler import create_concatenation_indices
+from fair_sentence_transformers.utils.embedding_io import (
     save_standalone_embeddings,
     save_latechunking_embeddings,
 )
@@ -511,7 +511,7 @@ def compute_embeddings(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def main():
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Compute embeddings for LoCoBench")
+    parser = argparse.ArgumentParser(description="Compute embeddings for fair_sentence_transformers")
     parser.add_argument("--config", required=True, help="Path to configuration file")
     args = parser.parse_args()
 

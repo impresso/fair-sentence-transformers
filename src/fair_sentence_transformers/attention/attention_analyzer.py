@@ -22,7 +22,7 @@ from datasets import Dataset, DatasetDict, load_from_disk
 from transformers import AutoModel
 from tqdm import tqdm
 
-from locobench.core.document_handler import DocumentHandler
+from fair_sentence_transformers.core.document_handler import DocumentHandler
 
 
 @dataclass
