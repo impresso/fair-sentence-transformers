@@ -12,6 +12,7 @@ This repository accompanies our [preprint(under review)](https://arxiv.org/abs/2
 
 - [Overview](#overview)
 - [Fair Sentence Transformers](#fair-sentence-transformers)
+- [Datasets](#datasets)
 - [Repository Structure](#repository-structure)
 - [Reproducing the Experiments](#reproducing-the-experiments)
 - [Citation](#citation)
@@ -26,6 +27,13 @@ We introduce an inference-time attention calibration method, implemented as an e
 
 1. Provide a Wrapper Class for inference-time calibration techniques that improve fairness in embedding models.
 2. Support existing and future embedding model releases through generic implementations configurable to each model's attributes.
+
+# Datasets
+
+We provide a multilingual comparable Wikipedia dataset for examining positional bias (see Section 3). The dataset includes six languages: English, Hindi, German, Italian, Korean, and Chinese.
+
+Access the dataset: https://huggingface.co/datasets/impresso-project/wiki_comparable_corpus_en_de_hi_it_ko_zh
+For instructions on loading and using the dataset, refer to the README on Hugging Face.
 
 ### Setup and Example use:
 
