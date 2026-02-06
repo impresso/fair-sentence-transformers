@@ -34,7 +34,7 @@ poetry install
 ```
 
 ```python
-from src.locobench.core.fair_sentence_transformer import FairSentenceTransformer
+from src.fair_sentence_transformers.core.fair_sentence_transformer import FairSentenceTransformer
  
 input_texts = [
     "What is the capital of Switzerland?",

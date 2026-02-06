@@ -1,5 +1,5 @@
 """
-Utility functions for analyzing segment embeddings in LoCoBench.
+Utility functions for analyzing segment embeddings in fair_sentence_transformers.
 This module provides tools for loading and processing embeddings for segment-level analysis.
 """
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from scipy import stats
 
 # Import necessary modules for loading embeddings
-from locobench.utils.embedding_io import (
+from fair_sentence_transformers.utils.embedding_io import (
     load_standalone_embeddings,
     load_latechunking_embeddings,
 )

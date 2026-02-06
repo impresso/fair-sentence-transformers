@@ -1,5 +1,5 @@
 """
-Segment Bias Analysis Module for LoCoBench
+Segment Bias Analysis Module for fair_sentence_transformers
 
 This module provides tools to analyze potential biases in how embedding models
 represent text segments within longer documents.

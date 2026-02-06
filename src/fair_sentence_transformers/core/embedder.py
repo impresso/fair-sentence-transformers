@@ -1,4 +1,4 @@
-# src/locobench/core/embedder.py
+# src/fair_sentence_transformers/core/embedder.py
 
 """
 Document Embedder Module

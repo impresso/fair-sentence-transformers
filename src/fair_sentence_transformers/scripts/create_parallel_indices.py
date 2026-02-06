@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Parallel Indices Creation Script for LoCoBench
+Parallel Indices Creation Script for fair_sentence_transformers
 
 This script creates concat_indices and standalone_indices for parallel datasets
 with multiple languages. It filters segments based on token length constraints
@@ -306,7 +306,7 @@ def save_indices(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create parallel indices for LoCoBench"
+        description="Create parallel indices for fair_sentence_transformers"
     )
 
     # Config file option

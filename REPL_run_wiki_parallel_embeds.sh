@@ -28,7 +28,7 @@ IFS=',' read -ra TARGET_LANGS <<< "$3"
 IFS=',' read -ra EXPERIMENTS <<< "$4"
 
 # Base paths
-SCRIPT_PATH="src/locobench/scripts/compute_embeddings.py"
+SCRIPT_PATH="src/fair_sentence_transformers/scripts/compute_embeddings.py"
 CONFIG_BASE_PATH="config/${MODEL_NAME}/wiki_parallel"
 
 echo "Running embedding computations for ${MODEL_NAME}"

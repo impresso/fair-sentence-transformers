@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Tokenization Script for LoCoBench
+Tokenization Script for fair_sentence_transformers
 
 This script tokenizes documents from various sources (jsonl, csv, txt, arrow)
 and saves the tokenized dataset and metadata for later use.
@@ -22,7 +22,7 @@ project_root = str(Path(__file__).parent.parent.parent.parent.absolute())
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from locobench.core.document_handler import DocumentHandler
+from fair_sentence_transformers.core.document_handler import DocumentHandler
 from datasets import load_from_disk
 
 
@@ -176,7 +176,7 @@ def tokenize_dataset(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def main():
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Tokenize documents for LoCoBench")
+    parser = argparse.ArgumentParser(description="Tokenize documents for fair_sentence_transformers")
     parser.add_argument("--config", required=True, help="Path to configuration file")
     args = parser.parse_args()
 

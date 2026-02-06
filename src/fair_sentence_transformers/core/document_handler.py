@@ -2,7 +2,7 @@
 Document Handler Module
 
 This module provides functionality for loading, preprocessing, and managing documents
-for LoCoBench operations. It handles document loading from
+for fair_sentence_transformers operations. It handles document loading from
 various sources, tokenization, and preparation of documents for embedding models.
 """
 
@@ -10,7 +10,7 @@ import os
 from typing import List, Dict, Tuple, Union
 import polars as pl
 from transformers import AutoTokenizer
-from locobench.utils.custom_data_collator import CustomDataCollatorWithPadding
+from fair_sentence_transformers.utils.custom_data_collator import CustomDataCollatorWithPadding
 from datasets import Dataset, DatasetDict
 import torch
 from torch.utils.data import DataLoader

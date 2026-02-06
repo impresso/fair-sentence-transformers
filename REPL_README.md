@@ -1,4 +1,4 @@
-# LoCoBench: Workbench and Benchmarking Framework for Long-Context Text Embedding Models
+# Workbench and Benchmarking Framework for Long-Context Text Embedding Models
 
 This README documents the current workflow to: build a multilingual Wikipedia dataset (comparable corpus), tokenize it, create parallel (aligned) indices, compute (calibrated) embeddings for Experiment 1 (Segment Representation) and Experiment 2 (Information Retention), and run Experiment 3 (Self-Attention Analysis), plus quantitative/qualitative analysis and utilities. 
 
@@ -58,7 +58,14 @@ Convenience: generate many embedding configs at once with `create_wiki_parallel_
 
 ## Data preparation
 
-### Build the multilingual Wikipedia dataset
+### OPTION 1: Download the multilingual Wikipedia (comparable corpus) dataset
+If you want to skip the dataset building steps and directly use the pre-built dataset, you can download the "wiki_comparable_corpus_en_de_hi_it_ko_zh" dataset from Hugging Face: [here](https://huggingface.co/datasets/impresso-project/wiki_comparable_corpus_en_de_hi_it_ko_zh).
+
+Create a folder named `data/` in the root of the repository and place the downloaded dataset folder inside it, resulting in a path like `data/wiki_comparable_corpus_en_de_hi_it_ko_zh/`.
+
+Then, proceed to the tokenization step below, pointing `dataset_path` in the config to the `data/wiki_comparable_corpus_en_de_hi_it_ko_zh` folder.
+
+### OPTION 2: Build the multilingual Wikipedia dataset from scratch (with title matching)
 
 We rely on the title matching tool from https://github.com/clab/wikipedia-parallel-titles. You can either:
 
@@ -108,12 +115,12 @@ If you prefer running single steps, see `REPL_run_wiki_parallel_steps.sh` for th
 
 ### Tokenize the dataset
 
-Use `src/locobench/scripts/tokenize_dataset.py`. For a HF dataset saved on disk, set `dataset_format` to `"arrow"` and point `dataset_path` to the dataset folder.
+Use `src/fair_sentence_transformers/scripts/tokenize_dataset.py`. For a HF dataset saved on disk, set `dataset_format` to `"arrow"` and point `dataset_path` to the dataset folder.
 
 Command:
 
 ```bash
-poetry run python src/locobench/scripts/tokenize_dataset.py --config config/tokenization_config_wiki_parallel.json
+poetry run python src/fair_sentence_transformers/scripts/tokenize_dataset.py --config config/tokenization_config_wiki_parallel.json
 ```
 
 Config (example for Alibaba-NLP/gte-multilingual-base):
@@ -137,7 +144,7 @@ Notes:
 
 ### Create parallel indices
 
-Use `src/locobench/scripts/create_parallel_indices.py` to pre-compute:
+Use `src/fair_sentence_transformers/scripts/create_parallel_indices.py` to pre-compute:
 - `concat_indices`: indices of segments to concatenate (permutation-based), and
 - `standalone_indices`: the set of used segment indices.
 
@@ -149,7 +156,7 @@ Why this step?
 Command:
 
 ```bash
-poetry run python src/locobench/scripts/create_parallel_indices.py --config config/wiki_parallel/indices_wiki_parallel_1_en_de_hi_it_ko_zh.config.json
+poetry run python src/fair_sentence_transformers/scripts/create_parallel_indices.py --config config/wiki_parallel/indices_wiki_parallel_1_en_de_hi_it_ko_zh.config.json
 ```
 
 Config (example):
@@ -180,7 +187,7 @@ Defaults:
 
 ### Compute embeddings (monolingual and mixed-language documents)
 
-Use `src/locobench/scripts/compute_embeddings.py`. You can run either monolingual (only `source_lang`) or mixed-language documents by including `target_lang` and pointing to the indices file from step 3.
+Use `src/fair_sentence_transformers/scripts/compute_embeddings.py`. You can run either monolingual (only `source_lang`) or mixed-language documents by including `target_lang` and pointing to the indices file from step 3.
 
 Mixed-language document convention:
 - `target_lang` is the language of the first segment in each concatenated document.
@@ -189,7 +196,7 @@ Mixed-language document convention:
 Command (example):
 
 ```bash
-poetry run python src/locobench/scripts/compute_embeddings.py --config config/Alibaba_mGTE/wiki_parallel/embedding_config_wiki_parallel_1_de_en.json
+poetry run python src/fair_sentence_transformers/scripts/compute_embeddings.py --config config/Alibaba_mGTE/wiki_parallel/embedding_config_wiki_parallel_1_de_en.json
 ```
 
 Config (mixed-language example):
@@ -259,7 +266,7 @@ Per-embedder overrides (optional):
 Command (example):
 
 ```bash
-poetry run python src/locobench/scripts/compute_embeddings.py --config config/Alibaba_mGTE/wiki_parallel/clb_LH_CLS_128_embedding_config_wiki_parallel_1_de_en.json
+poetry run python src/fair_sentence_transformers/scripts/compute_embeddings.py --config config/Alibaba_mGTE/wiki_parallel/clb_LH_CLS_128_embedding_config_wiki_parallel_1_de_en.json
 ```
 
 Config (mixed-language example; single set of top-level settings applies to both embedders):
@@ -299,7 +306,7 @@ Running:
 or run a single config directly via:
 
 ```bash
-poetry run python src/locobench/scripts/compute_embeddings.py --config <path-to-config.json>
+poetry run python src/fair_sentence_transformers/scripts/compute_embeddings.py --config <path-to-config.json>
 ```
 
 Notes:
@@ -374,7 +381,7 @@ Direct analyzer usage (optional):
 If you need finer control (e.g., relative bins, article-level aggregation, include/exclude tokens, device), you can call the analyzer directly:
 
 ```bash
-poetry run python -m locobench.attention.attention_analyzer \
+poetry run python -m fair_sentence_transformers.attention.attention_analyzer \
   --config config/Alibaba_mGTE/wiki_parallel/embedding_config_wiki_parallel_1_de_en.json \
   --analysis_mode baskets \
   --basket_size 128 \
@@ -386,11 +393,11 @@ This reads the same config format used for embeddings and produces outputs in `r
 
 ### Visualize attention results
 
-Use the helpers in `src/locobench/visualizations/attention_analyzer_viz.py` to visualize the JSON produced by the analyzer. A common workflow is:
+Use the helpers in `src/fair_sentence_transformers/visualizations/attention_analyzer_viz.py` to visualize the JSON produced by the analyzer. A common workflow is:
 
 ```python
 import glob
-from locobench.visualizations.attention_analyzer_viz import (
+from fair_sentence_transformers.visualizations.attention_analyzer_viz import (
   plot_results_file,
   plot_cls_attention_mass_cohorts,
 )
@@ -434,12 +441,12 @@ Notes:
 
 ### Quantitative
 
-After generating embeddings (Exp1 and Exp2), you can compute quantitative metrics using helpers in `src/locobench/analysis/numerical_analysis.py`. The notebook `notebooks/02_quant_results.ipynb` provides a worked example. Below is a summary of the steps involved.
+After generating embeddings (Exp1 and Exp2), you can compute quantitative metrics using helpers in `src/fair_sentence_transformers/analysis/numerical_analysis.py`. The notebook `notebooks/02_quant_results.ipynb` provides a worked example. Below is a summary of the steps involved.
 
 Step 1: Gather result paths for a model using the helper `categorize_paths_by_root`.
 
 ```python
-from locobench.analysis.numerical_analysis import categorize_paths_by_root
+from fair_sentence_transformers.analysis.numerical_analysis import categorize_paths_by_root
 
 language_order = ["en", "zh", "de", "it", "ko", "hi"]
 
@@ -480,7 +487,7 @@ Step 3: Collect position-analysis results.
 - Experiment 1 (Segment Representation):
 
 ```python
-from locobench.analysis.numerical_analysis import collect_multi_model_position_analysis_results
+from fair_sentence_transformers.analysis.numerical_analysis import collect_multi_model_position_analysis_results
 
 results_exp1 = collect_multi_model_position_analysis_results(
   paths=PATHS_MGTE_MONO,
@@ -501,7 +508,7 @@ results_exp2 = collect_multi_model_position_analysis_results(
 Step 4: Compute quantitative measures.
 
 ```python
-from locobench.analysis.numerical_analysis import (
+from fair_sentence_transformers.analysis.numerical_analysis import (
   compute_position_statistical_metrics,
   compute_position_diff_metrics,
 )
@@ -519,11 +526,11 @@ Notes:
 
 ### Qualitative (plots)
 
-For qualitative inspection and figures, use the multi-plotters in `src/locobench/visualizations/multi_plotter.py`. The notebook `notebooks/01_plots.ipynb` provides a worked example. Below is a summary of the steps involved. As with numerical analysis, start by collecting result paths via `categorize_paths_by_root` and pick pooling strategies per model.
+For qualitative inspection and figures, use the multi-plotters in `src/fair_sentence_transformers/visualizations/multi_plotter.py`. The notebook `notebooks/01_plots.ipynb` provides a worked example. Below is a summary of the steps involved. As with numerical analysis, start by collecting result paths via `categorize_paths_by_root` and pick pooling strategies per model.
 
 ```python
-from locobench.analysis.numerical_analysis import categorize_paths_by_root
-from locobench.visualizations.multi_plotter import (
+from fair_sentence_transformers.analysis.numerical_analysis import categorize_paths_by_root
+from fair_sentence_transformers.visualizations.multi_plotter import (
   DocumentLevel2SegmentStandaloneSimPlotter,
   SegmentLatechunk2SegmentStandaloneSimPlotter,
 )
@@ -609,18 +616,18 @@ Notes:
 
 ### Generate many configs and run all
 
-Use `src/locobench/scripts/create_wiki_parallel_configs.sh` to generate a whole set of monolingual and mixed-language configs for a given model and experiment number:
+Use `src/fair_sentence_transformers/scripts/create_wiki_parallel_configs.sh` to generate a whole set of monolingual and mixed-language configs for a given model and experiment number:
 
 ```bash
-./src/locobench/scripts/create_wiki_parallel_configs.sh <output_folder> <model> <experiment_number> <source_langs_comma> <target_langs_comma> [batch_size_standalone] [batch_size_concat]
+./src/fair_sentence_transformers/scripts/create_wiki_parallel_configs.sh <output_folder> <model> <experiment_number> <source_langs_comma> <target_langs_comma> [batch_size_standalone] [batch_size_concat]
 ```
 
 Examples:
 
 ```bash
-./src/locobench/scripts/create_wiki_parallel_configs.sh config/MyModel/wiki_parallel mgte 4 en,de en,de,ko
-./src/locobench/scripts/create_wiki_parallel_configs.sh config/MyModel/wiki_parallel jina 4 en,de en,de,ko 16 4
-./src/locobench/scripts/create_wiki_parallel_configs.sh config/MyModel/wiki_parallel qwen3 4 en,de en,de,ko
+./src/fair_sentence_transformers/scripts/create_wiki_parallel_configs.sh config/MyModel/wiki_parallel mgte 4 en,de en,de,ko
+./src/fair_sentence_transformers/scripts/create_wiki_parallel_configs.sh config/MyModel/wiki_parallel jina 4 en,de en,de,ko 16 4
+./src/fair_sentence_transformers/scripts/create_wiki_parallel_configs.sh config/MyModel/wiki_parallel qwen3 4 en,de en,de,ko
 ```
 
 Notes:

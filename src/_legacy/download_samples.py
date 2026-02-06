@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Dataset Sampling Script for LoCoBench
+Dataset Sampling Script for fair_sentence_transformers
 
 This script downloads a specified number of random samples from a Hugging Face dataset
 using streaming mode. It allows sampling without downloading the entire dataset.
@@ -26,7 +26,7 @@ if project_root not in sys.path:
 
 from datasets import load_dataset
 from datasets import Dataset as RegularDataset
-from locobench.utils.wikipedia_id_translator import WikipediaCuridTranslator
+from fair_sentence_transformers.utils.wikipedia_id_translator import WikipediaCuridTranslator
 
 
 def load_config(config_path: str) -> Dict[str, Any]:

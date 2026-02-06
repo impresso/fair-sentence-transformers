@@ -1,5 +1,5 @@
 """
-Numerical analysis utilities for LoCoBench.
+Numerical analysis utilities for fair_sentence_transformers.
 
 This module provides functions to compute and return numerical results that are
 otherwise used for plotting, enabling downstream statistical analysis without
